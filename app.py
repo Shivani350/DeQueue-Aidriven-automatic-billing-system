@@ -2,75 +2,58 @@ import streamlit as st
 import cv2
 import sqlite3
 from ultralytics import YOLO
-import datetime
 import numpy as np
-from PIL import Image
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 
-# 1. Page & Session Setup
-st.set_page_config(page_title="AI Smart Checkout", layout="wide")
+# 1. Page Setup
+st.set_page_config(page_title="AI Smart Checkout Live", layout="wide")
+st.title("🛒 AI Live Smart Checkout")
 
-# 2. Database Functions
+# 2. Database Function
 def get_db_info(item_name):
     try:
         conn = sqlite3.connect('mall.db')
         cursor = conn.cursor()
-        cursor.execute("SELECT barcode, price FROM products WHERE name = ?", (item_name,))
+        cursor.execute("SELECT price FROM products WHERE name = ?", (item_name,))
         result = cursor.fetchone()
         conn.close()
-        return result
+        return result[0] if result else None
     except:
         return None
 
-# 3. UI Layout
-st.title("🛒 AI Smart Checkout MVP")
-
-# Load AI Model (Cached to prevent timeouts)
+# 3. AI Model Loading (Cached)
 @st.cache_resource
 def load_model():
     return YOLO('yolov8n.pt')
 
 model = load_model()
 
-# Use Image Uploader for Cloud MVP
-uploaded_file = st.file_uploader("📸 Upload an item photo to scan", type=['jpg', 'jpeg', 'png'])
+# 4. WebRTC Video Processor
+class VideoProcessor(VideoTransformerBase):
+    def __init__(self):
+        self.model = model
 
-if uploaded_file is not None:
-    # Convert uploaded file to OpenCV format
-    image = Image.open(uploaded_file)
-    frame = np.array(image)
-    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    def transform(self, frame):
+        img = frame.to_ndarray(format="bgr24")
 
-    # Run AI Detection
-    results = model(frame, conf=0.5)
-    annotated_frame = results[0].plot()
-    detected_items = [model.names[int(c)] for c in results[0].boxes.cls]
+        # Run YOLO detection
+        results = self.model(img, conf=0.5)
+        annotated_img = results[0].plot()
 
-    # Display Results
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Detected Items")
-        st.image(annotated_frame, channels="BGR")
-
-    with col2:
-        st.subheader("Shopping Cart")
-        current_bill = ""
-        total_val = 0.0
+        # Extract names for the sidebar/cart logic
+        detected_names = [self.model.names[int(c)] for c in results[0].boxes.cls]
         
-        for item in set(detected_items):
-            db_data = get_db_info(item)
-            if db_data:
-                barcode, price = db_data
-                qty = detected_items.count(item)
-                current_bill += f"**{item.capitalize()}** x{qty} — ₹{price * qty:.2f} \n"
-                total_val += (price * qty)
+        # Note: In WebRTC, we return the image to the browser
+        return annotated_img
 
-        if current_bill:
-            st.markdown(current_bill)
-            st.divider()
-            st.markdown(f"### Total: ₹{total_val:.2f}")
-            if st.button("Finalize Sale", type="primary"):
-                st.balloons()
-                st.success("Transaction Complete!")
-        else:
-            st.warning("No recognized items found in the database.")
+# 5. UI Layout
+col_video, col_billing = st.columns([2, 1])
+
+with col_video:
+    st.subheader("Live WebRTC Feed")
+    webrtc_streamer(key="example", video_processor_factory=VideoProcessor)
+
+with col_billing:
+    st.subheader("Real-time Detection")
+    st.info("Items detected in the live feed will appear here. Note: WebRTC runs frame-by-frame; ensure a stable connection.")
+    # For a full MVP, you would use a placeholder here to update the bill
