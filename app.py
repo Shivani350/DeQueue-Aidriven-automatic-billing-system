@@ -6,6 +6,7 @@ import numpy as np
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 import threading
 import time
+from datetime import datetime
 
 # 1. Page Setup
 st.set_page_config(page_title="AI Smart Checkout Live", layout="wide")
@@ -45,7 +46,7 @@ class VideoProcessor(VideoTransformerBase):
             self.current_detections = names
         return results[0].plot()
 
-# 5. UI Layout - Define columns first
+# 5. UI Layout
 col_video, col_billing = st.columns([2, 1])
 
 with col_video:
@@ -54,25 +55,24 @@ with col_video:
 
 with col_billing:
     st.subheader("Current Bill")
-    bill_area = st.empty()  # Slot for the table
-    total_area = st.empty() # Slot for the total price
-    
-    # Place the button HERE so it is always visible
+    bill_area = st.empty()  
+    total_area = st.empty() 
     finalize_button = st.button("Finalize Sale", type="primary", use_container_width=True)
 
-# 6. Live Update Logic
+# 6. Live Update & Final Bill Logic
 if ctx.state.playing:
-    # Use a placeholder loop that won't crash the browser
     while True:
         if ctx.video_processor:
             with ctx.video_processor.lock:
                 detected_list = ctx.video_processor.current_detections
             
+            grand_total = 0.0
+            receipt_data = [] # Store data for the final bill
+            
             if detected_list:
-                grand_total = 0.0
                 table_content = "| Item | Qty | Price | Subtotal |\n| :--- | :--- | :--- | :--- |\n"
-                
                 valid_items_found = False
+                
                 for item_name in set(detected_list):
                     price = get_db_info(item_name)
                     if price:
@@ -81,20 +81,39 @@ if ctx.state.playing:
                         subtotal = price * qty
                         grand_total += subtotal
                         table_content += f"| {item_name.capitalize()} | {qty} | ₹{price} | **₹{subtotal}** |\n"
+                        receipt_data.append({"name": item_name, "qty": qty, "price": price, "sub": subtotal})
 
                 if valid_items_found:
                     bill_area.markdown(table_content)
                     total_area.markdown(f"## Total: ₹{grand_total:.2f}")
                 else:
-                    bill_area.warning(f"Detected {', '.join(set(detected_list))} but they are not in mall.db")
+                    bill_area.warning(f"Scanning: {', '.join(set(detected_list))} (Update mall.db)")
             else:
                 bill_area.info("Scanning for items...")
                 total_area.empty()
-        
-        # Check if the user clicked the button during the loop
+
+        # --- PROFESSIONAL BILL GENERATION ---
         if finalize_button:
             st.balloons()
-            st.success("Transaction Complete!")
-            break # Exit loop on finalize
+            # Clear the live feed view and show the receipt
+            with col_billing:
+                st.markdown("---")
+                st.markdown("### 🧾 OFFICIAL RECEIPT")
+                st.write(f"**Store:** VISTA AI MART")
+                st.write(f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                st.write("---")
+                
+                # Professional Receipt Table
+                for item in receipt_data:
+                    st.write(f"{item['name'].capitalize()} (x{item['qty']}) : ₹{item['sub']:.2f}")
+                
+                st.write("---")
+                st.markdown(f"## **GRAND TOTAL: ₹{grand_total:.2f}**")
+                st.write("Thank you for shopping with us!")
+                
+                # Optional: Add a Reset button to start a new sale
+                if st.button("New Transaction"):
+                    st.rerun()
+            break 
             
-        time.sleep(1) # Slow down refresh to 1 second to keep UI responsive
+        time.sleep(1)
