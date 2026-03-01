@@ -3,97 +3,74 @@ import cv2
 import sqlite3
 from ultralytics import YOLO
 import datetime
+import numpy as np
+from PIL import Image
 
 # 1. Page & Session Setup
 st.set_page_config(page_title="AI Smart Checkout", layout="wide")
 
-if 'checkout_complete' not in st.session_state:
-    st.session_state.checkout_complete = False
-
 # 2. Database Functions
 def get_db_info(item_name):
-    conn = sqlite3.connect('mall.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT barcode, price FROM products WHERE name = ?", (item_name,))
-    result = cursor.fetchone()
-    conn.close()
-    return result
+    try:
+        conn = sqlite3.connect('mall.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT barcode, price FROM products WHERE name = ?", (item_name,))
+        result = cursor.fetchone()
+        conn.close()
+        return result
+    except:
+        return None
 
-def commit_transaction(total, count):
-    conn = sqlite3.connect('mall.db')
-    cursor = conn.cursor()
-    # Ensure this table exists in your mall.db
-    cursor.execute("INSERT INTO transactions (total_amount, items_count) VALUES (?, ?)", (total, count))
-    conn.commit()
-    conn.close()
+# 3. UI Layout
+st.title("🛒 AI Smart Checkout MVP")
 
-# 3. Dialog (The Pop-up Bill)
-@st.dialog("🧾 FINAL RECEIPT")
-def show_receipt(bill_text, total, count):
-    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    st.markdown("### **VISTA SMART STORE**")
-    st.text(f"Date: {now}")
-    st.divider()
-    st.markdown(bill_text)
-    st.divider()
-    st.markdown(f"**Total Items:** {count}")
-    st.markdown(f"## **Total Amount: ₹{total:.2f}**")
-    st.divider()
-    if st.button("Start Next Sale", use_container_width=True):
-        st.session_state.checkout_complete = False
-        st.rerun()
+# Load AI Model (Cached to prevent timeouts)
+@st.cache_resource
+def load_model():
+    return YOLO('yolov8n.pt')
 
-# 4. UI Layout
-st.title("🛒 AI Smart Checkout Terminal")
-col_video, col_billing = st.columns([2, 1])
+model = load_model()
 
-# Load AI
-model = YOLO('yolov8n.pt')
-video_feed = cv2.VideoCapture(0)
+# Use Image Uploader for Cloud MVP
+uploaded_file = st.file_uploader("📸 Upload an item photo to scan", type=['jpg', 'jpeg', 'png'])
 
-with col_video:
-    st.subheader("Live Scanning Feed")
-    frame_window = st.empty()
+if uploaded_file is not None:
+    # Convert uploaded file to OpenCV format
+    image = Image.open(uploaded_file)
+    frame = np.array(image)
+    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
-with col_billing:
-    st.subheader("Shopping Cart")
-    cart_display = st.empty()
-    checkout_btn = st.button("Finalize Sale", type="primary", use_container_width=True)
-
-# 5. The Main Loop
-while video_feed.isOpened():
-    ret, frame = video_feed.read()
-    if not ret:
-        break
-
+    # Run AI Detection
     results = model(frame, conf=0.5)
     annotated_frame = results[0].plot()
     detected_items = [model.names[int(c)] for c in results[0].boxes.cls]
 
-    frame_window.image(annotated_frame, channels="BGR")
+    # Display Results
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Detected Items")
+        st.image(annotated_frame, channels="BGR")
 
-    current_bill = ""
-    total_val = 0.0
-    item_count = 0
+    with col2:
+        st.subheader("Shopping Cart")
+        current_bill = ""
+        total_val = 0.0
+        
+        for item in set(detected_items):
+            db_data = get_db_info(item)
+            if db_data:
+                barcode, price = db_data
+                qty = detected_items.count(item)
+                current_bill += f"**{item.capitalize()}** x{qty} — ₹{price * qty:.2f} \n"
+                total_val += (price * qty)
 
-    for item in set(detected_items):
-        db_data = get_db_info(item)
-        if db_data:
-            barcode, price = db_data
-            qty = detected_items.count(item)
-            current_bill += f"**{item.capitalize()}** x{qty} — ₹{price * qty:.2f}  \n"
-            total_val += (price * qty)
-            item_count += qty
-
-    cart_display.markdown(f"{current_bill} \n---\n ### Total: ₹{total_val:.2f}")
-
-    # --- CRITICAL CHANGE: Logic moved INSIDE the loop ---
-    if checkout_btn:
-        if item_count > 0:
-            commit_transaction(total_val, item_count)
-            video_feed.release()
-            show_receipt(current_bill, total_val, item_count)
-            st.balloons()
-            break
+        if current_bill:
+            st.markdown(current_bill)
+            st.divider()
+            st.markdown(f"### Total: ₹{total_val:.2f}")
+            if st.button("Finalize Sale", type="primary"):
+                st.balloons()
+                st.success("Transaction Complete!")
         else:
-            st.sidebar.warning("Scan an item first!")
+            st.warning("No recognized items found in the database.")
