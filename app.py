@@ -10,85 +10,89 @@ import threading
 st.set_page_config(page_title="AI Smart Checkout Live", layout="wide")
 st.title("🛒 AI Live Smart Checkout")
 
-# 2. Database Function
+# 2. Database Function (Fetches individual price)
 def get_db_info(item_name):
     try:
         conn = sqlite3.connect('mall.db')
         cursor = conn.cursor()
-        # Your original query: select barcode and price
-        cursor.execute("SELECT barcode, price FROM products WHERE name = ?", (item_name,))
+        cursor.execute("SELECT price FROM products WHERE name = ?", (item_name,))
         result = cursor.fetchone()
         conn.close()
-        return result # returns (barcode, price)
+        return result[0] if result else None
     except:
         return None
 
-# 3. AI Model Loading (Cached)
+# 3. AI Model Loading
 @st.cache_resource
 def load_model():
     return YOLO('yolov8n.pt')
 
 model = load_model()
 
-# 4. WebRTC Video Processor with Shared State
+# 4. The "Brain" - WebRTC Video Processor
 class VideoProcessor(VideoTransformerBase):
     def __init__(self):
         self.model = model
-        self.last_detected = []
+        self.current_detections = []
         self.lock = threading.Lock()
 
     def transform(self, frame):
         img = frame.to_ndarray(format="bgr24")
-
-        # Run YOLO detection
         results = self.model(img, conf=0.5)
-        annotated_img = results[0].plot()
-
-        # Get names of currently visible items
+        
+        # Get every single object found in the frame (allows for duplicates)
         names = [self.model.names[int(c)] for c in results[0].boxes.cls]
         
         with self.lock:
-            self.last_detected = names
+            self.current_detections = names
 
-        return annotated_img
+        return results[0].plot()
 
 # 5. UI Layout
 col_video, col_billing = st.columns([2, 1])
 
 with col_video:
-    st.subheader("Live WebRTC Feed")
-    ctx = webrtc_streamer(key="billing-system", video_processor_factory=VideoProcessor)
+    st.subheader("Live Scanning")
+    ctx = webrtc_streamer(key="billing", video_processor_factory=VideoProcessor)
 
 with col_billing:
-    st.subheader("Shopping Cart")
-    cart_placeholder = st.empty()
-    total_placeholder = st.empty()
+    st.subheader("Current Bill")
+    # Placeholders allow the text to refresh without moving the whole page
+    cart_table = st.empty()
+    total_display = st.empty()
 
-    # If the video stream is active, pull data from the processor
     if ctx.video_processor:
+        # This loop keeps the UI updated with the latest AI data
         with ctx.video_processor.lock:
-            current_items = ctx.video_processor.last_detected
+            detected_list = ctx.video_processor.current_detections
         
-        if current_items:
-            bill_details = ""
+        if detected_list:
+            bill_items = []
             grand_total = 0.0
             
-            # Use a set to avoid repeating the same item in the list
-            for item in set(current_items):
-                db_data = get_db_info(item)
-                if db_data:
-                    barcode, price = db_data
-                    qty = current_items.count(item)
-                    item_total = price * qty
-                    bill_details += f"**{item.capitalize()}** x{qty} — ₹{item_total:.2f}\n\n"
-                    grand_total += item_total
-            
-            cart_placeholder.markdown(bill_details)
-            total_placeholder.markdown(f"## Total: ₹{grand_total:.2f}")
-        else:
-            cart_placeholder.info("No items detected. Place an object in front of the camera.")
+            # Count each unique item found
+            for item_name in set(detected_list):
+                price = get_db_info(item_name)
+                if price:
+                    qty = detected_list.count(item_name) # Counts if there are 2+ of the same item
+                    subtotal = price * qty
+                    grand_total += subtotal
+                    bill_items.append(f"| {item_name.capitalize()} | {qty} | ₹{price} | **₹{subtotal}** |")
 
-# 6. Finalize Sale Button
-if st.button("Finalize Sale", type="primary", use_container_width=True):
-    st.balloons()
-    st.success("Transaction pushed to database!")
+            # Update the table and total
+            if bill_items:
+                table_header = "| Item | Qty | Price | Subtotal |\n| :--- | :--- | :--- | :--- |\n"
+                cart_table.markdown(table_header + "\n".join(bill_items))
+                total_display.markdown(f"## Total Amount: ₹{grand_total:.2f}")
+        else:
+            cart_table.info("Bring an item into the camera view...")
+            total_display.write("")
+
+# 6. Final Checkout
+if st.button("Finalize & Save Transaction", type="primary", use_container_width=True):
+    if 'grand_total' in locals() and grand_total > 0:
+        # You can add logic here to INSERT into a 'transactions' table
+        st.balloons()
+        st.success(f"Successfully billed ₹{grand_total:.2f}")
+    else:
+        st.warning("No items detected to bill.")
