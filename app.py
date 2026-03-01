@@ -46,12 +46,33 @@ class VideoProcessor(VideoTransformerBase):
             self.current_detections = names
         return results[0].plot()
 
-# 5. UI Layout
+# 5. The Professional Pop-up Function
+@st.dialog("🧾 Official Receipt")
+def show_receipt(data, total):
+    st.write(f"**VISTA AI MART**")
+    st.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    st.divider()
+    
+    # Itemized Table
+    st.markdown("| Item | Qty | Subtotal |")
+    st.markdown("| :--- | :--- | :--- |")
+    for item in data:
+        st.markdown(f"| {item['name'].capitalize()} | {item['qty']} | ₹{item['sub']:.2f} |")
+    
+    st.divider()
+    st.markdown(f"### **GRAND TOTAL: ₹{total:.2f}**")
+    st.write("Thank you for shopping!")
+    
+    if st.button("Close & New Sale"):
+        st.rerun()
+
+# 6. UI Layout
 col_video, col_billing = st.columns([2, 1])
 
 with col_video:
     st.subheader("Live Scanning")
-    ctx = webrtc_streamer(key="billing", video_processor_factory=VideoProcessor)
+    # The key helps reset the feed when the app reruns
+    ctx = webrtc_streamer(key="billing_feed", video_processor_factory=VideoProcessor)
 
 with col_billing:
     st.subheader("Current Bill")
@@ -59,7 +80,7 @@ with col_billing:
     total_area = st.empty() 
     finalize_button = st.button("Finalize Sale", type="primary", use_container_width=True)
 
-# 6. Live Update & Final Bill Logic
+# 7. Live Update Logic
 if ctx.state.playing:
     while True:
         if ctx.video_processor:
@@ -67,53 +88,39 @@ if ctx.state.playing:
                 detected_list = ctx.video_processor.current_detections
             
             grand_total = 0.0
-            receipt_data = [] # Store data for the final bill
+            receipt_items = []
             
             if detected_list:
                 table_content = "| Item | Qty | Price | Subtotal |\n| :--- | :--- | :--- | :--- |\n"
-                valid_items_found = False
+                valid_items = False
                 
                 for item_name in set(detected_list):
                     price = get_db_info(item_name)
                     if price:
-                        valid_items_found = True
+                        valid_items = True
                         qty = detected_list.count(item_name)
                         subtotal = price * qty
                         grand_total += subtotal
                         table_content += f"| {item_name.capitalize()} | {qty} | ₹{price} | **₹{subtotal}** |\n"
-                        receipt_data.append({"name": item_name, "qty": qty, "price": price, "sub": subtotal})
+                        receipt_items.append({"name": item_name, "qty": qty, "sub": subtotal})
 
-                if valid_items_found:
+                if valid_items:
                     bill_area.markdown(table_content)
                     total_area.markdown(f"## Total: ₹{grand_total:.2f}")
                 else:
-                    bill_area.warning(f"Scanning: {', '.join(set(detected_list))} (Update mall.db)")
+                    bill_area.warning("Items detected are not in mall.db")
             else:
                 bill_area.info("Scanning for items...")
                 total_area.empty()
 
-        # --- PROFESSIONAL BILL GENERATION ---
+        # Handle Finalize Click
         if finalize_button:
-            st.balloons()
-            # Clear the live feed view and show the receipt
-            with col_billing:
-                st.markdown("---")
-                st.markdown("### 🧾 OFFICIAL RECEIPT")
-                st.write(f"**Store:** VISTA AI MART")
-                st.write(f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                st.write("---")
+            if grand_total > 0:
+                # Stop the feed by breaking the loop and showing dialog
+                show_receipt(receipt_items, grand_total)
+                break 
+            else:
+                st.warning("No items to bill!")
+                break
                 
-                # Professional Receipt Table
-                for item in receipt_data:
-                    st.write(f"{item['name'].capitalize()} (x{item['qty']}) : ₹{item['sub']:.2f}")
-                
-                st.write("---")
-                st.markdown(f"## **GRAND TOTAL: ₹{grand_total:.2f}**")
-                st.write("Thank you for shopping with us!")
-                
-                # Optional: Add a Reset button to start a new sale
-                if st.button("New Transaction"):
-                    st.rerun()
-            break 
-            
-        time.sleep(1)
+        time.sleep(0.5)
