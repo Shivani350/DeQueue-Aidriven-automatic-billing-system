@@ -46,9 +46,10 @@ class VideoProcessor(VideoTransformerBase):
             self.current_detections = names
         return results[0].plot()
 
-# 5. The Professional Pop-up Function
+# 5. The Professional Pop-up Function (Balloons added here)
 @st.dialog("🧾 Official Receipt")
 def show_receipt(data, total):
+    st.balloons() # This ensures balloons appear when the pop-up opens
     st.write(f"**VISTA AI MART**")
     st.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     st.divider()
@@ -71,7 +72,6 @@ col_video, col_billing = st.columns([2, 1])
 
 with col_video:
     st.subheader("Live Scanning")
-    # The key helps reset the feed when the app reruns
     ctx = webrtc_streamer(key="billing_feed", video_processor_factory=VideoProcessor)
 
 with col_billing:
@@ -108,19 +108,18 @@ if ctx.state.playing:
                     bill_area.markdown(table_content)
                     total_area.markdown(f"## Total: ₹{grand_total:.2f}")
                 else:
-                    bill_area.warning("Items detected are not in mall.db")
+                    bill_area.warning("Scanning items... (Update mall.db if prices missing)")
             else:
-                bill_area.info("Scanning for items...")
+                bill_area.info("Bring an item to camera...")
                 total_area.empty()
 
         # Handle Finalize Click
         if finalize_button:
             if grand_total > 0:
-                # Stop the feed by breaking the loop and showing dialog
                 show_receipt(receipt_items, grand_total)
                 break 
             else:
-                st.warning("No items to bill!")
+                st.warning("No items detected to finalize!")
                 break
                 
         time.sleep(0.5)
