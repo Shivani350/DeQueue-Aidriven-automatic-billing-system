@@ -1,6 +1,7 @@
+opencv-python-headless
 streamlit
+ultralytics
 google-generativeai
 pandas
 python-dotenv
-ultralytics
-opencv-python-headless
+numpy
