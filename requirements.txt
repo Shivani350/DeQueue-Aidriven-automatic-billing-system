@@ -1,4 +1,4 @@
-opencv-python-headless==4.8.0.76
+opencv-python-headless==4.8.0.74
 streamlit
 streamlit-webrtc
 ultralytics
@@ -6,4 +6,3 @@ google-generativeai
 pandas
 python-dotenv
 numpy
-
