@@ -4,4 +4,3 @@ pandas
 python-dotenv
 ultralytics
 opencv-python-headless
-numpy
