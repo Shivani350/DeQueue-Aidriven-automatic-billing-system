@@ -1,5 +1,5 @@
 import streamlit as st
-import cv2
+//import cv2
 import sqlite3
 from ultralytics import YOLO
 import numpy as np
@@ -134,3 +134,4 @@ if ctx.state.playing:
                 break
                 
         time.sleep(0.5)
+
