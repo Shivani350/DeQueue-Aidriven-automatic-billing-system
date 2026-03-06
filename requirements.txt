@@ -2,3 +2,4 @@ streamlit
 google-generativeai
 pandas
 python-dotenv
+opencv-python-headless
