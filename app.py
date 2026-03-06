@@ -3,7 +3,7 @@ import cv2
 import sqlite3
 from ultralytics import YOLO
 import numpy as np
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 import threading
 import time
 from datetime import datetime
@@ -11,6 +11,11 @@ from datetime import datetime
 # 1. Page Setup
 st.set_page_config(page_title="AI Smart Checkout Live", layout="wide")
 st.title("🛒 AI Live Smart Checkout")
+
+# RTC Configuration for Cloud Deployment (STUN servers allow the camera to work over the internet)
+RTC_CONFIG = RTCConfiguration(
+    {"iceServers": [{"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]}]}
+)
 
 # 2. Database Function
 def get_db_info(item_name):
@@ -32,29 +37,30 @@ def load_model():
 model = load_model()
 
 # 4. WebRTC Video Processor
-class VideoProcessor(VideoTransformerBase):
+class VideoProcessor(VideoProcessorBase):
     def __init__(self):
         self.model = model
         self.current_detections = []
         self.lock = threading.Lock()
 
-    def transform(self, frame):
+    def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
         results = self.model(img, conf=0.5)
         names = [self.model.names[int(c)] for c in results[0].boxes.cls]
+        
         with self.lock:
             self.current_detections = names
+            
         return results[0].plot()
 
-# 5. The Professional Pop-up Function (Balloons added here)
+# 5. The Professional Pop-up Function
 @st.dialog("🧾 Official Receipt")
 def show_receipt(data, total):
-    st.balloons() # This ensures balloons appear when the pop-up opens
+    st.balloons() 
     st.write(f"**VISTA AI MART**")
     st.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     st.divider()
     
-    # Itemized Table
     st.markdown("| Item | Qty | Subtotal |")
     st.markdown("| :--- | :--- | :--- |")
     for item in data:
@@ -72,7 +78,12 @@ col_video, col_billing = st.columns([2, 1])
 
 with col_video:
     st.subheader("Live Scanning")
-    ctx = webrtc_streamer(key="billing_feed", video_processor_factory=VideoProcessor)
+    ctx = webrtc_streamer(
+        key="billing_feed", 
+        video_processor_factory=VideoProcessor,
+        rtc_configuration=RTC_CONFIG,
+        media_stream_constraints={"video": True, "audio": False}
+    )
 
 with col_billing:
     st.subheader("Current Bill")
